@@ -16,6 +16,7 @@ module Network.Wai.Handler.WarpTLS (
     -- * Runner
       runTLS
     , runTLSSocket
+    , runTLSAccept
     -- * Settings
     , TLSSettings
     , defaultTlsSettings
@@ -224,10 +225,27 @@ runTLSSocket tlsset set sock app = do
     runTLSSocket' tlsset set credentials mgr sock app
 
 runTLSSocket' :: TLSSettings -> Settings -> TLS.Credentials -> TLS.SessionManager -> Socket -> Application -> IO ()
-runTLSSocket' tlsset@TLSSettings{..} set credentials mgr sock app =
+runTLSSocket' tlsset set credentials mgr sock app =
+    runTLSAccept' tlsset set credentials mgr accept' app
+  where
+    accept' =
+#if WINDOWS
+        windowsThreadBlockHack $ accept sock
+#else
+        accept sock
+#endif
+
+runTLSAccept :: TLSSettings -> Settings -> IO (Socket, SockAddr) -> Application -> IO ()
+runTLSAccept tlsset set accept' app = do
+    credentials <- loadCredentials tlsset
+    mgr <- getSessionManager tlsset
+    runTLSAccept' tlsset set credentials mgr accept' app
+
+runTLSAccept' :: TLSSettings -> Settings -> TLS.Credentials -> TLS.SessionManager -> IO (Socket, SockAddr) -> Application -> IO ()
+runTLSAccept' tlsset@TLSSettings{..} set credentials mgr accept' app =
     runSettingsConnectionMakerSecure set get app
   where
-    get = getter tlsset set sock params
+    get = getter tlsset set accept' params
     params = def { -- TLS.ServerParams
         TLS.serverWantClientCert = tlsWantClientCert
       , TLS.serverCACertificates = []
@@ -268,13 +286,9 @@ alpn xs
 
 ----------------------------------------------------------------
 
-getter :: TLS.TLSParams params => TLSSettings -> Settings -> Socket -> params -> IO (IO (Connection, Transport), SockAddr)
-getter tlsset set sock params = do
-#if WINDOWS
-    (s, sa) <- windowsThreadBlockHack $ accept sock
-#else
-    (s, sa) <- accept sock
-#endif
+getter :: TLS.TLSParams params => TLSSettings -> Settings -> IO (Socket, SockAddr) -> params -> IO (IO (Connection, Transport), SockAddr)
+getter tlsset set accept' params = do
+    (s, sa) <- accept'
     setSocketCloseOnExec s
     return (mkConn tlsset set s params, sa)
 
