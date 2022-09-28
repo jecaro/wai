@@ -63,7 +63,7 @@ import qualified Data.IORef as I
 import Data.Streaming.Network (bindPortTCP, safeRecv)
 import Data.Typeable (Typeable)
 import GHC.IO.Exception (IOErrorType(..))
-import Network.Socket (Socket, close, withSocketsDo, SockAddr, accept)
+import Network.Socket (Socket, close, withSocketsDo, SockAddr)
 #if MIN_VERSION_network(3,1,1)
 import Network.Socket (gracefulClose)
 #endif
@@ -269,12 +269,8 @@ alpn xs
 ----------------------------------------------------------------
 
 getter :: TLS.TLSParams params => TLSSettings -> Settings -> Socket -> params -> IO (IO (Connection, Transport), SockAddr)
-getter tlsset set sock params = do
-#if WINDOWS
-    (s, sa) <- windowsThreadBlockHack $ accept sock
-#else
-    (s, sa) <- accept sock
-#endif
+getter tlsset set@Settings{settingsAccept = accept'} sock params = do
+    (s, sa) <- accept' sock
     setSocketCloseOnExec s
     return (mkConn tlsset set s params, sa)
 
